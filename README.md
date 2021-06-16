@@ -1,3 +1,4 @@
+```sml
 (*********************************************************************)
 (*                                                                   *)
 (*                      STRATAGEM Version 1.1                        *)
@@ -12,7 +13,7 @@
 (* simple ML programs as examples. Tested on NJ-SML v. 110.0.7.      *)
 (*                                                                   *)
 (*********************************************************************)
-
+```
 STRATAGEM is a research prototype system illustrating some recent
 theoretical ideas in game semantics. Given an already compiled ML
 function or operation supplied by the user, STRATAGEM extracts the
