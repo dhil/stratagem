@@ -1,0 +1,5 @@
+(executable
+ (name stratagem)
+ (public_name stratagem)
+ (modes native byte)
+ (libraries multicont))

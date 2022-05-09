@@ -1,0 +1,26 @@
+opam-version: "2.0"
+maintainer: "Daniel Hillerström <daniel.hillerstrom@ed.ac.uk>"
+authors: [ "Daniel Hillerström"
+           "John Longley" ]
+synopsis: "STRATAGEM is a research prototype system illustrating some recent theoretical ideas in game semantics"
+description: """
+STRATAGEM is a research prototype system illustrating some theoretical
+ideas in game semantics. Given an already compiled ML function or
+operation supplied by the user, STRATAGEM extracts the underlying
+'computation strategy' and allows it to be explored and manipulated in
+various ways. Possible applications include execution tracing,
+interactive execution, and program optimization.
+"""
+homepage: "https://github.com/dhil/stratagem"
+dev-repo: "git+https://github.com/dhil/stratagem.git"
+bug-reports: "https://github.com/dhil/stratagem"
+license: "GPL3-only"
+version: "1.1"
+
+build: [
+  [ "dune" "build" ]
+]
+
+depends: [
+  "ocaml" {>= "5.0"}
+]
