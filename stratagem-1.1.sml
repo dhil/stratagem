@@ -173,8 +173,8 @@ signature DECODER = sig
 end
 
 
-(* The other direction: stuff for translating a game play for the ML type
-   into a forest dialogue. *)
+(* The other direction: stuff for translating a game play for the ML
+   type into a forest dialogue. *)
 
 signature ENCODER = sig
 
