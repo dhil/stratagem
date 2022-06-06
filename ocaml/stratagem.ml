@@ -88,7 +88,7 @@ end
 module type FOREST = sig
    type nat
    type forest = Forest of (nat -> (nat * forest))
-   val (%)    : forest * nat -> nat * forest
+   val (%)    : forest -> nat -> nat * forest
    val apply  : forest -> forest -> forest
    val lambda : (forest -> forest) -> forest
    val reset  : unit -> bool
@@ -377,9 +377,8 @@ end = struct
 
   type forest = Forest of (nat -> (nat * forest))
 
-  let run (Forest f, n) = f n
+  let run (Forest f) n = f n
   let (%) = run
-
   (* Application operation *)
 
   (* To apply a forest F to a forest G, we interpret the labels on F
@@ -387,50 +386,79 @@ end = struct
      obtained subtree of G (identified by a timestamp), or *answers*
      giving the labels on the resulting tree. *)
 
-  let apply f g =
-    let exception Diverge in
-    let diverge () = print_endline "Diverging..."; raise Diverge in
-    let rec lookup t = function
-      | [] -> diverge () (* diverge if timestamp is unknown *)
-      | (t', f) :: rest ->
-         if t = t' then f else lookup t rest
-    in
-    let rec play (Forest f) previous timestamp n =
-      let (f_label, f_cont) = f n in
-      if is_ans f_label then (de_ans f_label, Forest (play f_cont previous timestamp))
-      else let (n, t) = proj (de_quest f_label) in
-           let (m, g) = run ((lookup (int t) previous), n) in
-           play f_cont ((timestamp, g) :: previous) (timestamp+1) m
-    in
-    Forest (play f [(0, g)] 1)
+  let apply : forest -> forest -> forest
+    = let rec apply f g = Forest (fun i -> apply'' (f % i) g)
+      and apply'' (n, f) g = (n, apply f g) in
+      apply
 
-  (* Abstraction operation *)
-  type lambda_stamp = unit ref
+  (* Much harder is the "lambda" operation, which requires
+     catchcont3. Some "error handling" is needed here to cope with
+     non-linear behaviour where it can't arise. *)
 
-  (* Q-exceptions: restartable exceptions for generating question nodes *)
+  type Effect.t += Question : nat -> nat Effect.t
+  let question n = Effect.perform (Question n)
 
-  type 'a cont = ('a, unit) Multicont.Deep.resumption
-  type carries = nat * int
-  type gives = nat * forest
-  type result = gives
-  type handler = carries -> (gives -> (unit -> result) cont -> result) -> result
-  type exit = lambda_stamp * (unit -> result) cont
+  type branch = nat -> nat * forest
+  exception NonLinearError
+  let error_branch : branch
+    = fun _i -> raise NonLinearError 
 
-  let exit_list = ref ([] : exit list)
-  let reset () =
-    let exception Q_E of lambda_stamp * carries * gives cont * exit list in
-    let rec lookup s = function
-      | [] -> (None, [])
-      | (s', k) :: rest ->
-         if s = s' then (Some k, rest)
-         else match lookup s rest with
-              | (v, rest') -> (v, (s', k) :: rest')
-    in
-    let extract_exit s =
-      match lookup s !exit_list with
-      | (v, exits) -> exit_list := exits; v
-    in
+  let lambda : (forest -> forest) -> forest
+    = let rec lambda phi = lambda' (fun f -> phi (Forest f))
+      and lambda' (p : branch -> forest) =
+        Forest (fun h -> lambda'' (fun g -> p g % h))
+      and lambda'' (_r : branch -> nat * forest) =
+        failwith "TODO"
+      in
+      lambda
 
+  let reset = failwith "TODO"
 
-  let lambda _phi = failwith "TODO"
+  (* let apply f g =
+   *   let exception Diverge in
+   *   let diverge () = print_endline "Diverging..."; raise Diverge in
+   *   let rec lookup t = function
+   *     | [] -> diverge () (\* diverge if timestamp is unknown *\)
+   *     | (t', f) :: rest ->
+   *        if t = t' then f else lookup t rest
+   *   in
+   *   let rec play (Forest f) previous timestamp n =
+   *     let (f_label, f_cont) = f n in
+   *     if is_ans f_label then (de_ans f_label, Forest (play f_cont previous timestamp))
+   *     else let (n, t) = proj (de_quest f_label) in
+   *          let (m, g) = run ((lookup (int t) previous), n) in
+   *          play f_cont ((timestamp, g) :: previous) (timestamp+1) m
+   *   in
+   *   Forest (play f [(0, g)] 1)
+   * 
+   * (\* Abstraction operation *\)
+   * type lambda_stamp = unit ref
+   * 
+   * (\* Q-exceptions: restartable exceptions for generating question nodes *\)
+   * 
+   * type 'a cont = ('a, unit) Multicont.Deep.resumption
+   * type carries = nat * int
+   * type gives = nat * forest
+   * type result = gives
+   * type handler = carries -> (gives -> (unit -> result) cont -> result) -> result
+   * type exit = lambda_stamp * (unit -> result) cont *)
+
+  (* let exit_list = ref ([] : exit list)
+   * let reset () =
+   *   let exception Q_E of lambda_stamp * carries * gives cont * exit list in
+   *   let rec lookup s = function
+   *     | [] -> (None, [])
+   *     | (s', k) :: rest ->
+   *        if s = s' then (Some k, rest)
+   *        else match lookup s rest with
+   *             | (v, rest') -> (v, (s', k) :: rest')
+   *   in
+   *   let extract_exit s =
+   *     match lookup s !exit_list with
+   *     | (v, exits) -> exit_list := exits; v
+   *   in
+   *   failwith "TODO"
+   * 
+   * 
+   * let lambda _phi = failwith "TODO" *)
 end
