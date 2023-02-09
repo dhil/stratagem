@@ -18,39 +18,34 @@
 
 (* An implementation of Call/cc; temporary structure to preserve
    familiarity with SML/NJ code. *)
-module Callcc(T : sig type ans end): sig
-  val callcc : ((T.ans -> T.ans) -> T.ans) -> T.ans
-  val prompt : (unit -> T.ans) -> T.ans
+module Callcc: sig
+  val callcc : (('a -> 'a) -> 'a) -> 'a
+  val prompt : (unit -> 'a) -> 'a
 end = struct
-  type _ Effect.t +=
-   | Callcc : ((T.ans -> T.ans) -> T.ans) -> T.ans Effect.t
+  type _ Effect.t += Callcc : (('a -> 'a) -> 'a) -> 'a Effect.t
 
-  let callcc : ((T.ans -> T.ans) -> T.ans) -> T.ans
+  let callcc : (('a -> 'a) -> 'a) -> 'a
     = fun f -> Effect.perform (Callcc f)
 
-  let rec hprompt : unit -> (T.ans, T.ans) Effect.Deep.handler
+  let rec hprompt : unit -> ('a, 'a) Effect.Deep.handler
     = fun () ->
     let open Effect.Deep in
-    { retc = (fun ans -> ans)
-    ; exnc = raise
-    ; effc = (fun (type b) (eff : b Effect.t) ->
-      match eff with
-      | Callcc f ->
-         Some (fun (k : (b, _) Effect.Deep.continuation) ->
-             let k = Multicont.Deep.promote k in
-             let exception Throw of T.ans in
-             try
-               let ans =
+      { retc = (fun ans -> ans)
+      ; exnc = raise
+      ; effc = (fun (type a) (eff : a Effect.t) ->
+        match eff with
+        | Callcc f ->
+           Some (fun (k : (a, _) continuation) ->
+               let exception Throw of a in
+               try
                  prompt (fun () ->
-                     f (fun x -> raise (Throw x)))
-               in
-               Multicont.Deep.resume k ans
-             with
-             | Throw ans -> ans)
-      | _ -> None) }
-  and prompt : (unit -> T.ans) -> T.ans
-    = fun f ->
-    Effect.Deep.match_with f () (hprompt ())
+                     let ans = f (fun x -> raise (Throw x)) in
+                     continue k ans)
+               with
+               | Throw x -> continue k x)
+        | _ -> None) }
+  and prompt : (unit -> 'a) -> 'a
+    = fun f -> Effect.Deep.match_with f () (hprompt ())
 end
 
 (* SIGNATURE DECLARATIONS *)
@@ -511,8 +506,6 @@ end = struct
 
     exception Q_exn of lambda_stamp * carries * (result -> result)
 
-    module Callcc = Callcc(struct type ans = (unit -> result) end)
-
     let q_try' : lambda_stamp -> (unit -> result) -> handler -> (unit -> result)
       = fun stamp code handler ->
       let answer =
@@ -523,8 +516,8 @@ end = struct
            else let resume y new_exit =
                   let open Callcc in
                   exit_list := (stamp, new_exit) :: pending @ !exit_list;
-                  callcc (fun _ -> (fun () -> k y))
-                in handler x (fun res k -> resume res k ())
+                  callcc (fun _k' -> k y)
+                in handler x resume
       in
       try
         return_to stamp (fun () -> answer)
@@ -539,7 +532,7 @@ end = struct
       q_try' stamp code
         (fun t c ->
           let open Callcc in
-          let d x = callcc (fun k -> (fun () -> c x k)) () in
+          let d x = callcc (fun k () -> c x k) () in
           raise (Q_exn (stamp, t, d))) ()
 
     let q_raise : lambda_stamp -> carries -> (unit -> result)
