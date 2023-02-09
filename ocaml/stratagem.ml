@@ -30,6 +30,7 @@ end = struct
 
   let rec hprompt : unit -> (T.ans, T.ans) Effect.Deep.handler
     = fun () ->
+    let open Effect.Deep in
     { retc = (fun ans -> ans)
     ; exnc = raise
     ; effc = (fun (type b) (eff : b Effect.t) ->
@@ -48,7 +49,7 @@ end = struct
              | Throw ans -> ans)
       | _ -> None) }
   and prompt : (unit -> T.ans) -> T.ans
-    = fun (type a) f ->
+    = fun f ->
     Effect.Deep.match_with f () (hprompt ())
 end
 
@@ -471,79 +472,90 @@ end = struct
   type lambda_stamp = unit ref
 
   (* Q-exceptions: restartable exceptions for generating question nodes *)
+  module Q = struct
+    type 'a cont = 'a -> 'a (* ('a, 'a) Multicont.Deep.resumption *)
+    type carries = nat * int
+    type gives = nat * forest
+    type result = gives
+    type handler = carries -> (gives -> (unit -> result) cont -> result) -> result
+    type exit = lambda_stamp * (unit -> result) cont
 
-  type 'a cont = 'a -> 'a (* ('a, 'a) Multicont.Deep.resumption *)
-  type carries = nat * int
-  type gives = nat * forest
-  type result = gives
-  type handler = carries -> (gives -> (unit -> result) cont -> result) -> result
-  type exit = lambda_stamp * (unit -> result) cont
+    let exit_list = ref ([] : exit list)
+    exception Q_E of lambda_stamp * carries * gives cont * exit list
+    let rec lookup s = function
+      | [] -> (None, [])
+      | (s', k) :: rest ->
+         if s = s' then (Some k, rest)
+         else match lookup s rest with
+              | (v, rest') -> (v, (s', k) :: rest')
 
-  let exit_list = ref ([] : exit list)
-  exception Q_E of lambda_stamp * carries * gives cont * exit list
-  let rec lookup s = function
-    | [] -> (None, [])
-    | (s', k) :: rest ->
-       if s = s' then (Some k, rest)
-       else match lookup s rest with
-            | (v, rest') -> (v, (s', k) :: rest')
+    let extract_exit s =
+      match lookup s !exit_list with
+      | (v, exits) -> exit_list := exits; v
 
-  let extract_exit s =
-    match lookup s !exit_list with
-    | (v, exits) -> exit_list := exits; v
+    let return_to s f =
+      match extract_exit s with
+      | None -> f
+      | Some k -> k f
 
-  let return_to s f =
-    match extract_exit s with
-    | None -> f
-    | Some k -> k f
+    let q_e_return (s, (s', x', k', pending)) =
+      match extract_exit s with
+      | None -> (fun () -> raise (Q_E (s', x', k', pending)))
+      | Some k -> k (fun () -> raise (Q_E (s', x', k', (s, k) :: pending)))
 
-  let q_e_return (s, (s', x', k', pending)) =
-    match extract_exit s with
-    | None -> (fun () -> raise (Q_E (s', x', k', pending)))
-    | Some k -> k (fun () -> raise (Q_E (s', x', k', (s, k) :: pending)))
-
-  let reset () =
-    match !exit_list with
-    | [] -> true
-    | _ -> (exit_list := []; false)
+    let reset () =
+      match !exit_list with
+      | [] -> true
+      | _ -> (exit_list := []; false)
 
 
-  exception Q_exn of lambda_stamp * carries * (result -> result)
+    exception Q_exn of lambda_stamp * carries * (result -> result)
 
-  module Callcc = Callcc(struct type ans = (unit -> result) end)
+    module Callcc = Callcc(struct type ans = (unit -> result) end)
 
-  let q_try' : lambda_stamp -> (unit -> result) -> handler -> (unit -> result)
-    = fun stamp code handler ->
-    let answer =
-      try code () with
-      | Q_E (s, x, k, pending) ->
-         if s <> stamp
-         then raise (Q_E (s, x, k, pending))
-         else let resume y new_exit =
-                let open Callcc in
-                exit_list := (stamp, new_exit) :: pending @ !exit_list;
-                callcc (fun _ -> (fun () -> k y))
-              in handler x (fun res k -> resume res k ())
-    in
-    try
-      return_to stamp (fun () -> answer)
-    with
-    | Q_exn (s, x, k) ->
-       return_to s (fun () -> raise (Q_exn (s, x, k)))
-    | Q_E (s, x, k, pending) -> q_e_return (s, (s, x, k, pending))
-    | other -> return_to stamp (fun () -> raise other)
+    let q_try' : lambda_stamp -> (unit -> result) -> handler -> (unit -> result)
+      = fun stamp code handler ->
+      let answer =
+        try code () with
+        | Q_E (s, x, k, pending) ->
+           if s <> stamp
+           then raise (Q_E (s, x, k, pending))
+           else let resume y new_exit =
+                  let open Callcc in
+                  exit_list := (stamp, new_exit) :: pending @ !exit_list;
+                  callcc (fun _ -> (fun () -> k y))
+                in handler x (fun res k -> resume res k ())
+      in
+      try
+        return_to stamp (fun () -> answer)
+      with
+      | Q_exn (s, x, k) ->
+         return_to s (fun () -> raise (Q_exn (s, x, k)))
+      | Q_E (s, x, k, pending) -> q_e_return (s, (s, x, k, pending))
+      | other -> return_to stamp (fun () -> raise other)
 
-  let q_try : lambda_stamp -> (unit -> result) -> result
-    = fun stamp code ->
-    q_try' stamp code
-      (fun t c ->
-        let open Callcc in
-        let d x = callcc (fun k -> (fun () -> c x k)) () in
-        raise (Q_exn (stamp, t, d))) ()
+    let q_try : lambda_stamp -> (unit -> result) -> result
+      = fun stamp code ->
+      q_try' stamp code
+        (fun t c ->
+          let open Callcc in
+          let d x = callcc (fun k -> (fun () -> c x k)) () in
+          raise (Q_exn (stamp, t, d))) ()
 
-  let q_raise : lambda_stamp -> carries -> (unit -> result)
-    = fun stamp x ->
-    Callcc.callcc (fun k -> raise (Q_E (stamp, x, (fun res -> k (fun () -> res) ()), [])))
+    let q_raise : lambda_stamp -> carries -> (unit -> result)
+      = fun stamp x ->
+      Callcc.callcc (fun k -> raise (Q_E (stamp, x, (fun res -> k (fun () -> res) ()), [])))
+  end
+  let reset = Q.reset
 
+   (* A-exceptions: simple restartable exceptions allowing us to change
+      our mind about the argument of a function in mid-computation. *)
+  module A = struct
+    type 'a cont = 'a -> 'a
+    type carries = int
+    type gives = forest
+    type 'a handler = carries -> (gives -> 'a) -> 'a
+    exception A_E of carries * gives cont
+  end
   let lambda _phi = failwith "TODO"
 end
