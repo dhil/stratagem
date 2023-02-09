@@ -16,6 +16,42 @@
 (*                                                                   *)
 (*********************************************************************)
 
+(* An implementation of Call/cc; temporary structure to preserve
+   familiarity with SML/NJ code. *)
+module Callcc(T : sig type ans end): sig
+  val callcc : ((T.ans -> T.ans) -> T.ans) -> T.ans
+  val prompt : (unit -> T.ans) -> T.ans
+end = struct
+  type _ Effect.t +=
+   | Callcc : ((T.ans -> T.ans) -> T.ans) -> T.ans Effect.t
+
+  let callcc : ((T.ans -> T.ans) -> T.ans) -> T.ans
+    = fun f -> Effect.perform (Callcc f)
+
+  let rec hprompt : unit -> (T.ans, T.ans) Effect.Deep.handler
+    = fun () ->
+    { retc = (fun ans -> ans)
+    ; exnc = raise
+    ; effc = (fun (type b) (eff : b Effect.t) ->
+      match eff with
+      | Callcc f ->
+         Some (fun (k : (b, _) Effect.Deep.continuation) ->
+             let k = Multicont.Deep.promote k in
+             let exception Throw of T.ans in
+             try
+               let ans =
+                 prompt (fun () ->
+                     f (fun x -> raise (Throw x)))
+               in
+               Multicont.Deep.resume k ans
+             with
+             | Throw ans -> ans)
+      | _ -> None) }
+  and prompt : (unit -> T.ans) -> T.ans
+    = fun (type a) f ->
+    Effect.Deep.match_with f () (hprompt ())
+end
+
 (* SIGNATURE DECLARATIONS *)
 
 (* Natural numbers with coding functions.
@@ -386,79 +422,128 @@ end = struct
      obtained subtree of G (identified by a timestamp), or *answers*
      giving the labels on the resulting tree. *)
 
-  let apply : forest -> forest -> forest
-    = let rec apply f g = Forest (fun i -> apply'' (f % i) g)
-      and apply'' (n, f) g = (n, apply f g) in
-      apply
+  (* let apply : forest -> forest -> forest *)
+  (*   = let rec apply f g = Forest (fun i -> apply'' (f % i) g) *)
+  (*     and apply'' (n, f) g = (n, apply f g) in *)
+  (*     apply *)
 
   (* Much harder is the "lambda" operation, which requires
      catchcont3. Some "error handling" is needed here to cope with
      non-linear behaviour where it can't arise. *)
 
-  type Effect.t += Question : nat -> nat Effect.t
-  let question n = Effect.perform (Question n)
+  (* type _ Effect.t += Question : nat -> nat Effect.t *)
+  (* let question n = Effect.perform (Question n) *)
 
-  type branch = nat -> nat * forest
-  exception NonLinearError
-  let error_branch : branch
-    = fun _i -> raise NonLinearError 
+  (* type branch = nat -> nat * forest *)
+  (* exception NonLinearError *)
+  (* let error_branch : branch *)
+  (*   = fun _i -> raise NonLinearError *)
 
-  let lambda : (forest -> forest) -> forest
-    = let rec lambda phi = lambda' (fun f -> phi (Forest f))
-      and lambda' (p : branch -> forest) =
-        Forest (fun h -> lambda'' (fun g -> p g % h))
-      and lambda'' (_r : branch -> nat * forest) =
-        failwith "TODO"
-      in
-      lambda
+  (* let lambda : (forest -> forest) -> forest *)
+  (*   = let rec lambda phi = lambda' (fun f -> phi (Forest f)) *)
+  (*     and lambda' (p : branch -> forest) = *)
+  (*       Forest (fun h -> lambda'' (fun g -> p g % h)) *)
+  (*     and lambda'' (_r : branch -> nat * forest) = *)
+  (*       failwith "TODO" *)
+  (*     in *)
+  (*     lambda *)
 
-  let reset = failwith "TODO"
+  (* let reset = failwith "TODO" *)
 
-  (* let apply f g =
-   *   let exception Diverge in
-   *   let diverge () = print_endline "Diverging..."; raise Diverge in
-   *   let rec lookup t = function
-   *     | [] -> diverge () (\* diverge if timestamp is unknown *\)
-   *     | (t', f) :: rest ->
-   *        if t = t' then f else lookup t rest
-   *   in
-   *   let rec play (Forest f) previous timestamp n =
-   *     let (f_label, f_cont) = f n in
-   *     if is_ans f_label then (de_ans f_label, Forest (play f_cont previous timestamp))
-   *     else let (n, t) = proj (de_quest f_label) in
-   *          let (m, g) = run ((lookup (int t) previous), n) in
-   *          play f_cont ((timestamp, g) :: previous) (timestamp+1) m
-   *   in
-   *   Forest (play f [(0, g)] 1)
-   * 
-   * (\* Abstraction operation *\)
-   * type lambda_stamp = unit ref
-   * 
-   * (\* Q-exceptions: restartable exceptions for generating question nodes *\)
-   * 
-   * type 'a cont = ('a, unit) Multicont.Deep.resumption
-   * type carries = nat * int
-   * type gives = nat * forest
-   * type result = gives
-   * type handler = carries -> (gives -> (unit -> result) cont -> result) -> result
-   * type exit = lambda_stamp * (unit -> result) cont *)
+  let apply f g =
+    let exception Diverge in
+    let diverge () = print_endline "Diverging..."; raise Diverge in
+    let rec lookup t = function
+      | [] -> diverge () (* diverge if timestamp is unknown *)
+      | (t', f) :: rest ->
+         if t = t' then f else lookup t rest
+    in
+    let rec play (Forest f) previous timestamp n =
+      let (f_label, f_cont) = f n in
+      if is_ans f_label then (de_ans f_label, Forest (play f_cont previous timestamp))
+      else let (n, t) = proj (de_quest f_label) in
+           let (m, g) = run (lookup (int t) previous) n in
+           play f_cont ((timestamp, g) :: previous) (timestamp+1) m
+    in
+    Forest (play f [(0, g)] 1)
 
-  (* let exit_list = ref ([] : exit list)
-   * let reset () =
-   *   let exception Q_E of lambda_stamp * carries * gives cont * exit list in
-   *   let rec lookup s = function
-   *     | [] -> (None, [])
-   *     | (s', k) :: rest ->
-   *        if s = s' then (Some k, rest)
-   *        else match lookup s rest with
-   *             | (v, rest') -> (v, (s', k) :: rest')
-   *   in
-   *   let extract_exit s =
-   *     match lookup s !exit_list with
-   *     | (v, exits) -> exit_list := exits; v
-   *   in
-   *   failwith "TODO"
-   * 
-   * 
-   * let lambda _phi = failwith "TODO" *)
+  (* Abstraction operation *)
+  type lambda_stamp = unit ref
+
+  (* Q-exceptions: restartable exceptions for generating question nodes *)
+
+  type 'a cont = 'a -> 'a (* ('a, 'a) Multicont.Deep.resumption *)
+  type carries = nat * int
+  type gives = nat * forest
+  type result = gives
+  type handler = carries -> (gives -> (unit -> result) cont -> result) -> result
+  type exit = lambda_stamp * (unit -> result) cont
+
+  let exit_list = ref ([] : exit list)
+  exception Q_E of lambda_stamp * carries * gives cont * exit list
+  let rec lookup s = function
+    | [] -> (None, [])
+    | (s', k) :: rest ->
+       if s = s' then (Some k, rest)
+       else match lookup s rest with
+            | (v, rest') -> (v, (s', k) :: rest')
+
+  let extract_exit s =
+    match lookup s !exit_list with
+    | (v, exits) -> exit_list := exits; v
+
+  let return_to s f =
+    match extract_exit s with
+    | None -> f
+    | Some k -> k f
+
+  let q_e_return (s, (s', x', k', pending)) =
+    match extract_exit s with
+    | None -> (fun () -> raise (Q_E (s', x', k', pending)))
+    | Some k -> k (fun () -> raise (Q_E (s', x', k', (s, k) :: pending)))
+
+  let reset () =
+    match !exit_list with
+    | [] -> true
+    | _ -> (exit_list := []; false)
+
+
+  exception Q_exn of lambda_stamp * carries * (result -> result)
+
+  module Callcc = Callcc(struct type ans = (unit -> result) end)
+
+  let q_try' : lambda_stamp -> (unit -> result) -> handler -> (unit -> result)
+    = fun stamp code handler ->
+    let answer =
+      try code () with
+      | Q_E (s, x, k, pending) ->
+         if s <> stamp
+         then raise (Q_E (s, x, k, pending))
+         else let resume y new_exit =
+                let open Callcc in
+                exit_list := (stamp, new_exit) :: pending @ !exit_list;
+                callcc (fun _ -> (fun () -> k y))
+              in handler x (fun res k -> resume res k ())
+    in
+    try
+      return_to stamp (fun () -> answer)
+    with
+    | Q_exn (s, x, k) ->
+       return_to s (fun () -> raise (Q_exn (s, x, k)))
+    | Q_E (s, x, k, pending) -> q_e_return (s, (s, x, k, pending))
+    | other -> return_to stamp (fun () -> raise other)
+
+  let q_try : lambda_stamp -> (unit -> result) -> result
+    = fun stamp code ->
+    q_try' stamp code
+      (fun t c ->
+        let open Callcc in
+        let d x = callcc (fun k -> (fun () -> c x k)) () in
+        raise (Q_exn (stamp, t, d))) ()
+
+  let q_raise : lambda_stamp -> carries -> (unit -> result)
+    = fun stamp x ->
+    Callcc.callcc (fun k -> raise (Q_E (stamp, x, (fun res -> k (fun () -> res) ()), [])))
+
+  let lambda _phi = failwith "TODO"
 end
