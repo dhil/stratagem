@@ -1,3 +1,16 @@
+(env
+ (dev
+  (flags (:standard
+          -strict-formats     ;; Disallows legacy formats.
+          -strict-sequence    ;; Enforces the lhs of a sequence to have type `unit'.
+          -safe-string        ;; Immutable strings.
+          -bin-annot          ;; Dumps information per (file) module about types, bindings, tail-calls, etc. Used by some tools.
+          -warn-error -a      ;; Do not treat warnings as errors.
+          -w +A-4-42-44-45-48-60-67-70  ;; Ignores warnings 4, 42, 44, 45, 48, 60, 67, and 70.
+          -g                  ;; Adds debugging information to the resulting executable / library.
+ )))
+)
+
 (executable
  (name stratagem)
  (public_name stratagem)
