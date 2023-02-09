@@ -549,6 +549,22 @@ end = struct
     type gives = forest
     type 'a handler = carries -> (gives -> 'a) -> 'a
     exception A_E of carries * gives cont
+
+    let a_try : (unit -> 'a) -> 'a handler -> 'a
+      = fun code handler ->
+      try code () with
+      | A_E (x, k) -> handler x k
+
+    let a_raise : carries -> 'b
+      = fun x -> Callcc.callcc (fun k -> raise (A_E (x,k)))
+
+  (* A little recursion to smuggle a forest F into the computation of F'.
+     Timestamps are used to distinguish between different A_raise:s.
+
+     Known inefficiency: we get nested calls to A_plugin accumulating
+     as we move down the forest (this happens even with lambda id).
+     Getting rid of these should be possible, but not trivial. *)
+
   end
   let lambda _phi = failwith "TODO"
 end
