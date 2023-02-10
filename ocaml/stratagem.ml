@@ -19,12 +19,19 @@
 (* An implementation of Call/cc; temporary structure to preserve
    familiarity with SML/NJ code. *)
 module Callcc: sig
-  val callcc : (('a -> 'a) -> 'a) -> 'a
+  type 'a cont
+  val throw : 'a cont -> 'a -> 'b
+  val callcc : ('a cont -> 'a) -> 'a
   val prompt : (unit -> 'a) -> 'a
 end = struct
-  type _ Effect.t += Callcc : (('a -> 'a) -> 'a) -> 'a Effect.t
+  type empty = |
+  type 'a cont = 'a -> empty
+  type _ Effect.t += Callcc : (('a -> 'b) -> 'a) -> 'a Effect.t
 
-  let callcc : (('a -> 'a) -> 'a) -> 'a
+  let throw : 'a cont -> 'a -> 'b
+    = fun k x -> match k x with | _ -> .
+
+  let callcc : (('a -> 'b) -> 'a) -> 'a
     = fun f -> Effect.perform (Callcc f)
 
   let rec hprompt : unit -> ('a, 'a) Effect.Deep.handler
@@ -37,9 +44,12 @@ end = struct
         | Callcc f ->
            Some (fun (k : (a, _) continuation) ->
                let exception Throw of a in
+               let cont : a -> empty
+                 = fun x -> raise (Throw x)
+               in
                try
                  prompt (fun () ->
-                     let ans = f (fun x -> raise (Throw x)) in
+                     let ans = f (fun x -> match cont x with _ -> .) in
                      continue k ans)
                with
                | Throw x -> continue k x)
@@ -124,6 +134,12 @@ module type FOREST = sig
    val apply  : forest -> forest -> forest
    val lambda : (forest -> forest) -> forest
    val reset  : unit -> bool
+   module A: sig
+    (* type carries = int *)
+    (* type gives = forest *)
+    (* type 'a handler = carries -> (gives -> 'a) -> 'a *)
+     val a_try : (unit -> 'a) -> (int -> (forest -> 'a) -> 'a) -> 'a
+   end
 end
 
 module type IRRED = sig
@@ -468,7 +484,7 @@ end = struct
 
   (* Q-exceptions: restartable exceptions for generating question nodes *)
   module Q = struct
-    type 'a cont = 'a -> 'a (* ('a, 'a) Multicont.Deep.resumption *)
+    type 'a cont = 'a Callcc.cont
     type carries = nat * int
     type gives = nat * forest
     type result = gives
@@ -491,12 +507,12 @@ end = struct
     let return_to s f =
       match extract_exit s with
       | None -> f
-      | Some k -> k f
+      | Some k -> Callcc.throw k f
 
     let q_e_return (s, (s', x', k', pending)) =
       match extract_exit s with
       | None -> (fun () -> raise (Q_E (s', x', k', pending)))
-      | Some k -> k (fun () -> raise (Q_E (s', x', k', (s, k) :: pending)))
+      | Some k -> Callcc.throw k (fun () -> raise (Q_E (s', x', k', (s, k) :: pending)))
 
     let reset () =
       match !exit_list with
@@ -516,7 +532,7 @@ end = struct
            else let resume y new_exit =
                   let open Callcc in
                   exit_list := (stamp, new_exit) :: pending @ !exit_list;
-                  callcc (fun _k' -> k y)
+                  callcc (fun _k' -> throw k y)
                 in handler x resume
       in
       try
@@ -535,16 +551,16 @@ end = struct
           let d x = callcc (fun k () -> c x k) () in
           raise (Q_exn (stamp, t, d))) ()
 
-    let q_raise : lambda_stamp -> carries -> (unit -> result)
+    let q_raise : lambda_stamp -> carries -> result
       = fun stamp x ->
-      Callcc.callcc (fun k -> raise (Q_E (stamp, x, (fun res -> k (fun () -> res) ()), [])))
+      Callcc.callcc (fun (k : gives Callcc.cont) -> raise (Q_E (stamp, x, k, [])))
   end
   let reset = Q.reset
 
    (* A-exceptions: simple restartable exceptions allowing us to change
       our mind about the argument of a function in mid-computation. *)
   module A = struct
-    type 'a cont = 'a -> 'a
+    type 'a cont = 'a Callcc.cont
     type carries = int
     type gives = forest
     type 'a handler = carries -> (gives -> 'a) -> 'a
@@ -553,7 +569,7 @@ end = struct
     let a_try : (unit -> 'a) -> 'a handler -> 'a
       = fun code handler ->
       try code () with
-      | A_E (x, k) -> handler x k
+      | A_E (x, k) -> handler x (Callcc.throw k)
 
     let a_raise : carries -> 'b
       = fun x -> Callcc.callcc (fun k -> raise (A_E (x,k)))
@@ -565,6 +581,46 @@ end = struct
      as we move down the forest (this happens even with lambda id).
      Getting rid of these should be possible, but not trivial. *)
 
+    let rec a_plugin : carries -> forest -> forest -> forest
+      = fun t f f' ->
+      Forest (fun m ->
+          a_try
+            (fun () ->
+              let (i, f'') = run f' m in
+              (i, a_plugin t f f''))
+            (fun t' c ->
+              if t' = t
+              then c f
+              else c (a_raise t')))
+
   end
-  let lambda _phi = failwith "TODO"
+
+  (* The abstraction operation itself *)
+  let lambda : (forest -> forest) -> forest
+    = fun phi ->
+    let stamp = ref () in
+    let q_try = Q.q_try stamp in
+    let q_raise = Q.q_raise stamp in
+    (* the main recursion *)
+    let rec lambda' : int -> (forest -> forest) -> forest
+      = fun timestamp phi ->
+      Forest (fun m ->
+          try
+            (match (q_try (fun () ->
+                        phi (A.a_try
+                               (fun () -> A.a_raise timestamp)
+                               (fun t c ->
+                                 if t = timestamp
+                                 then c (Forest (fun n -> q_raise (n, t)))
+                                 else c (A.a_raise t))) % m))
+             with
+             | (a, f') -> (ans a, lambda' timestamp (fun f -> A.a_plugin timestamp f f')))
+          with
+          | Q.Q_exn (s, (n, timestamp'), c) ->
+             if s <> stamp
+             then raise (Q.Q_exn (s, (n, timestamp'), c))
+             else let q = quest (pair n (nat timestamp)) in
+                  (q, lambda' (timestamp+1)
+                        (fun f -> Forest (fun p -> c (p, f)))))
+    in lambda' 0 phi
 end
