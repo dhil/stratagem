@@ -43,6 +43,8 @@ end = struct
         match eff with
         | Callcc f ->
            Some (fun (k : (a, _) continuation) ->
+               let open Multicont.Deep in
+               let r = promote k in
                let exception Throw of a in
                let cont : a -> empty
                  = fun x -> raise (Throw x)
@@ -50,9 +52,9 @@ end = struct
                try
                  prompt (fun () ->
                      let ans = f (fun x -> match cont x with _ -> .) in
-                     continue k ans)
+                     resume r ans)
                with
-               | Throw x -> continue k x)
+               | Throw x -> resume r x)
         | _ -> None) }
   and prompt : (unit -> 'a) -> 'a
     = fun f -> Effect.Deep.match_with f () (hprompt ())
