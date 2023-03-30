@@ -18,23 +18,25 @@
 (*********************************************************************)
 
 module Move: sig
-  type t = Basic of int
+  type t = Atom of int
          | Pair of t * t
          | Question of t
          | Answer of t
 
-  val basic : int -> t
+  val atom : int -> t
   val pair : t -> t -> t
+
   val question : t -> t
   val answer : t -> t
 end = struct
-  type t = Basic of int
+  type t = Atom of int
          | Pair of t * t
          | Question of t
          | Answer of t
 
-  let basic n = Basic n
+  let atom n = Atom n
   let pair m m' = Pair (m, m')
+
   let question m = Question m
   let answer m = Answer m
 end
@@ -61,7 +63,8 @@ end = struct
     = fun (Forest f) i -> f i
   let (%) : t -> Move.t -> Move.t * t
     = run
-  let (%%) = (%)
+  let (%%) : t -> Move.t -> Move.t * t
+    = (%)
 
   let rec apply : t -> t -> t
     = fun f g ->
@@ -136,3 +139,58 @@ end = struct
           (m, to_forest o))
   end
 end
+
+(* The next task is to implement the retraction (!forest) <| forest *)
+module Retraction = struct
+
+  let rec decode_left : Move.t -> int = function
+    | Move.(Pair (Atom i, _)) -> i
+    | Move.Pair (m, _) -> decode_left m
+    | _ -> assert false
+
+  let embed : Forest.t -> Forest.t
+    = fun f ->
+    let rec embed' : Forest.t list -> (Move.t -> Move.t * Forest.t)
+      = fun subforests h ->
+      match h with
+      | Move.Pair (i, j) ->
+         let open Forest in
+         let i' = decode_left i in
+         let f = List.nth subforests i' in
+         let (k, g) = f % j in
+         (k, Forest (embed' (subforests @ [g])))
+      | _ -> assert false
+    in
+    Forest (embed' [f])
+
+  let project : Forest.t -> Forest.t
+    = fun f ->
+    let rec project_object : Forest.Object.t -> Forest.t
+      = fun o ->
+      let counter = ref 0 in
+      let rec copy i j =
+        let m = o (Move.Pair (i, j)) in
+        (m, Forest.Forest (copy (incr counter; Move.Atom !counter)))
+      in Forest.Forest (copy (Move.Atom 0))
+    in
+    project_object (Forest.Object.of_forest f)
+end
+
+let rec diverge _ =
+  let exception Diverge in
+  raise Diverge
+
+let divergent_forest = Forest.Forest diverge
+
+let atom2atom_embed : (Move.t -> Move.t) -> Forest.t
+  = fun h ->
+  Forest.Forest (fun i -> (h i, divergent_forest))
+
+let atom2atom_project : Forest.t -> Move.t -> Move.t
+  = fun f i -> fst Forest.(f % i)
+
+let atom2forest_embed : (Move.t -> Forest.t) -> Forest.t
+  = fun i -> Forest.Forest (fun j -> (Move.Atom 0, i j))
+
+let atom2forest_project : Forest.t -> Move.t -> Forest.t
+  = fun f i -> snd Forest.(f % i)
