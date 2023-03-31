@@ -20,22 +20,30 @@
 module Move: sig
   type t = Atom of int
          | Pair of t * t
+         | Inl of t
+         | Inr of t
          | Question of t
          | Answer of t
 
   val atom : int -> t
   val pair : t -> t -> t
+  val inl : t -> t
+  val inr : t -> t
 
   val question : t -> t
   val answer : t -> t
 end = struct
   type t = Atom of int
          | Pair of t * t
+         | Inl of t
+         | Inr of t
          | Question of t
          | Answer of t
 
   let atom n = Atom n
   let pair m m' = Pair (m, m')
+  let inl m = Inl m
+  let inr m = Inr m
 
   let question m = Question m
   let answer m = Answer m
@@ -194,3 +202,13 @@ let atom2forest_embed : (Move.t -> Forest.t) -> Forest.t
 
 let atom2forest_project : Forest.t -> Move.t -> Forest.t
   = fun f i -> snd Forest.(f % i)
+
+let example () =
+  let open Move in
+  let open Forest in
+  let lam =
+    lambda
+      (fun f ->
+        Forest (fun i -> (atom 42, f)))
+  in
+  apply lam (Forest (fun i -> (atom 32, divergent_forest)))
