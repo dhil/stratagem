@@ -4,7 +4,7 @@
 (*                      Complete source code                         *)
 (*                                                                   *)
 (*  (C) Daniel Hillerström &                                         *)
-(*      John Longley, The University of Edinburgh, March2023         *)
+(*      John Longley, The University of Edinburgh, March 2023        *)
 (*                      Version 2: March 2023                        *)
 (*                                                                   *)
 (*********************************************************************)
@@ -20,6 +20,7 @@
 module Move: sig
   type t = Atom of int
          | Pair of t * t
+         | Tag of t * int (* tagged copy *)
          | Inl of t
          | Inr of t
          | Question of t
@@ -35,6 +36,7 @@ module Move: sig
 end = struct
   type t = Atom of int
          | Pair of t * t
+         | Tag of t * int (* tagged copy *)
          | Inl of t
          | Inr of t
          | Question of t
@@ -211,4 +213,4 @@ let example () =
       (fun f ->
         Forest (fun i -> (atom 42, f)))
   in
-  apply lam (Forest (fun i -> (atom 32, divergent_forest)))
+  apply lam (Forest (fun i -> (i, divergent_forest)))
